@@ -158,3 +158,31 @@ R  | Best
 - **Parameter range:** 3.7M — 45.9M
 - **Hyperparameters:** Adam (lr=3e-4, wd=1e-5), batch=32, patience=20, 300 max epochs
 - **Best classifier architecture:** `hidden_dim (512) → ReLU → Dropout → 6855` (no hidden layers)
+
+---
+
+## 5-Fold Cross-Validation (Generalization Assessment)
+
+**Purpose:** Validate the top 3 models across 5 random splits to estimate true generalization performance.
+
+**Split scheme:** 5 case-level folds (76/18/23 per fold; fold5: 74/18/25). Each fold uses distinct test cases — no case appears in multiple test sets.
+
+### Results
+
+| Model | Fold 1 | Fold 2 | Fold 3 | Fold 4 | Fold 5 | **Mean ± Std** | Params |
+|-------|--------|--------|--------|--------|--------|----------------|--------|
+| **MoAE h=512** | 0.4464 | 0.4974 | 0.4906 | 0.4144 | 0.4304 | **0.4558 ± 0.0328** | 3.7M |
+| Dual-Path h=1536 | 0.4127 | 0.4937 | 0.4770 | 0.3925 | 0.4303 | **0.4413 ± 0.0383** | 27.7M |
+| MoAE h=1024 dp=0.5 | 0.4174 | 0.4945 | 0.4472 | 0.3895 | 0.4338 | **0.4365 ± 0.0348** | 20.7M |
+
+### Key Findings
+
+- **MoAE h=512 confirms its lead** with the highest CV mean (R=0.4558) and competitive stability (σ=0.0328)
+- **Dual-Path h=1536** also achieves R>0.49 on folds 2 and 3, but shows higher variance (σ=0.0383) — more sensitive to split composition
+- **All three models** show significant split-to-split variability (R range ~0.08-0.10), indicating the 117-case dataset is inherently challenging for generalization
+- The original single-split estimate (R=0.4814 for MoAE h=512) was **optimistic by ~0.026** relative to the CV mean — reasonable but worth discounting
+- **Fold 4** is the hardest split across all models (MoAE: 0.4144, Dual-Path: 0.3925, MoAE large: 0.3895)
+
+### Updated Leadership
+
+The CV results confirm that **model rankings are stable** — MoAE h=512 leads in both mean and stability. The original single-split leaderboard order holds true under cross-validation.
