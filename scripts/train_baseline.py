@@ -138,7 +138,12 @@ def main():
     parser.add_argument("--hidden_dim", type=int, default=256,
                         help="Attention hidden dim (auto-scaled for retccl)")
     parser.add_argument("--model", type=str, default="meanpool_linear",
-                        choices=["meanpool_linear", "meanpool", "attention"])
+                        choices=["meanpool_linear", "meanpool", "attention",
+                                 "multihead_attention", "dualpath",
+                                 "transformer", "topk_attention", "deepsets",
+                                 "lowrank_attention", "perceiver", "prototype",
+                                 "sinkhorn", "moae", "dualmoe",
+                                 "crossattn_fusion", "progressive", "sparse_top2"])
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--wd", type=float, default=1e-5)
     parser.add_argument("--batch_size", type=int, default=32)
@@ -148,11 +153,40 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--factorized", action="store_true")
-    parser.add_argument("--latent_dim", type=int, default=256)
+    parser.add_argument("--pca_dim", type=int, default=256)
     parser.add_argument("--cls_dims", type=str, default=None,
                         help="Comma-separated classifier hidden dims, e.g. '1024,512'. Default = [hidden_dim, hidden_dim//2]")
     parser.add_argument("--dropout", type=float, default=0.3,
                         help="Dropout rate in classifier (default: 0.3)")
+    parser.add_argument("--n_heads", type=int, default=4,
+                        help="Number of attention heads (multihead_attention, transformer)")
+    parser.add_argument("--n_layers", type=int, default=2,
+                        help="Number of transformer layers (transformer)")
+    parser.add_argument("--top_k", type=int, default=64,
+                        help="Number of top patches to keep (topk_attention)")
+    parser.add_argument("--norm", type=str, default="ln",
+                        choices=["bn", "ln"],
+                        help="Normalization type: bn=BatchNorm, ln=LayerNorm")
+    parser.add_argument("--residual", action="store_true",
+                        help="Use residual connections in classifier")
+    parser.add_argument("--latent_dim", type=int, default=64,
+                        help="Latent dimension for lowrank_attention decoder")
+    parser.add_argument("--use_skip", action="store_true", default=True,
+                        help="Use skip connection in lowrank_attention")
+    parser.add_argument("--n_latents", type=int, default=16,
+                        help="Number of latent tokens for perceiver model")
+    parser.add_argument("--n_prototypes", type=int, default=32,
+                        help="Number of prototypes for prototype model")
+    parser.add_argument("--temperature", type=float, default=1.0,
+                        help="Temperature for soft assignment (prototype, sinkhorn)")
+    parser.add_argument("--n_slots", type=int, default=16,
+                        help="Number of slots for sinkhorn model")
+    parser.add_argument("--n_sinkhorn_iters", type=int, default=3,
+                        help="Sinkhorn iterations for sinkhorn model")
+    parser.add_argument("--sinkhorn_epsilon", type=float, default=0.05,
+                        help="Entropy regularization for Sinkhorn")
+    parser.add_argument("--n_experts", type=int, default=4,
+                        help="Number of experts for moae model")
     args = parser.parse_args()
 
     if args.cls_dims is not None:
@@ -204,7 +238,7 @@ def main():
         print(f"Auto-detected feature dim: {args.in_dim}")
 
     hidden_dim = args.hidden_dim
-    if args.model == "attention" and args.in_dim >= 1024:
+    if args.model in ("attention", "multihead_attention", "dualpath", "topk_attention", "lowrank_attention") and args.in_dim >= 1024:
         hidden_dim = max(args.hidden_dim, args.in_dim // 4)
         print(f"Scaled attention hidden_dim to {hidden_dim} (in_dim={args.in_dim})")
 
@@ -229,9 +263,9 @@ def main():
 
     if args.factorized and args.model == "attention":
         n_train = len(train_targets)
-        latent_dim = min(args.latent_dim, n_train - 1)
-        if latent_dim < args.latent_dim:
-            print(f"Clamping latent_dim from {args.latent_dim} to {latent_dim} (n_train={n_train})")
+        latent_dim = min(args.pca_dim, n_train - 1)
+        if latent_dim < args.pca_dim:
+            print(f"Clamping pca_dim from {args.pca_dim} to {latent_dim} (n_train={n_train})")
         pca = PCA(n_components=latent_dim, svd_solver="randomized")
         train_targets_norm = normalizer.transform(train_targets).numpy()
         pca.fit(train_targets_norm)
@@ -245,12 +279,23 @@ def main():
                                        decoder_weight=decoder_weight,
                                        decoder_bias=decoder_bias)
         print(f"Factorized head: latent_dim={latent_dim}")
-        args.latent_dim = latent_dim
+        args.pca_dim = latent_dim
     else:
         cls_dims = args.cls_dims if args.cls_dims is not None else [hidden_dim, hidden_dim // 2]
         model = build_model(args.model, in_dim=args.in_dim, out_dim=out_dim,
                             hidden_dim=hidden_dim, hidden_dims=cls_dims,
-                            dropout=args.dropout)
+                            dropout=args.dropout,
+                            n_heads=args.n_heads, n_layers=args.n_layers,
+                            top_k=args.top_k,
+                            norm=args.norm, residual=args.residual,
+                            latent_dim=args.latent_dim, use_skip=args.use_skip,
+                            n_latents=args.n_latents,
+                            n_prototypes=args.n_prototypes,
+                            temperature=args.temperature,
+                            n_slots=args.n_slots,
+                            n_sinkhorn_iters=args.n_sinkhorn_iters,
+                            sinkhorn_epsilon=args.sinkhorn_epsilon,
+                            n_experts=args.n_experts)
     model = model.to(device)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
