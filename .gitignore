@@ -1,0 +1,39 @@
+# Model checkpoints (large binary files)
+*.pt
+*.pth
+*.ckpt
+
+# Experiment logs
+*.log
+
+# Serialized normalizer
+normalizer.pkl
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Environment
+.conda/
+env/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Coverage
+htmlcov/
+.coverage

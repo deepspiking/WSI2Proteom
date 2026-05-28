@@ -1,0 +1,20 @@
+[project]
+name = "wsi2proteom"
+version = "0.1.0"
+description = "Training code for WSI feature to proteome prediction"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pandas",
+  "torch",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
