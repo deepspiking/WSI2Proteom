@@ -1,0 +1,16 @@
+{
+  "args": {
+    "model": "meanpool_linear",
+    "features": "ctranspath",
+    "train_samples": 89,
+    "test_samples": 21
+  },
+  "best_epoch": 182,
+  "train_pearson_last": 0.387,
+  "test_pearson_r": 0.378,
+  "test_sample_pearson_mean": 0.201,
+  "test_top1k_protein_pearson": 0.763,
+  "test_median_protein_pearson": 0.403,
+  "test_loss": 0.379,
+  "total_params": 8067579
+}

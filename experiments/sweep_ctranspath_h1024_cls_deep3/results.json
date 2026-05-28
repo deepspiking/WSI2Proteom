@@ -1,0 +1,41 @@
+{
+  "args": {
+    "manifest": "data/paired_manifest.csv",
+    "proteome": "/data/workspace/ai2bio/data/CPTAC-BRCA_v1/CPTAC2_Breast_Prospective_Collection_BI_Proteome_unshared_vectors_nonan.pkl",
+    "split": "data/splits/split_v1.csv",
+    "feature_model": "ctranspath",
+    "in_dim": 768,
+    "hidden_dim": 1024,
+    "model": "attention",
+    "lr": 0.0003,
+    "wd": 1e-05,
+    "batch_size": 32,
+    "epochs": 200,
+    "patience": 30,
+    "output_dir": "experiments/sweep_ctranspath_h1024_cls_deep3",
+    "seed": 42,
+    "device": "cuda",
+    "factorized": false,
+    "latent_dim": 256,
+    "cls_dims": [
+      1024,
+      1024,
+      1024,
+      512
+    ]
+  },
+  "out_dim": 6855,
+  "best_epoch": 47,
+  "best_val_loss": 0.2659246623516083,
+  "best_val_pearson": 0.5013479590415955,
+  "best_val_spearman": 0.41478490829467773,
+  "test_loss": 0.3441292941570282,
+  "test_pearson_r": 0.4678534269332886,
+  "test_spearman_r": 0.3974488377571106,
+  "test_sample_pearson_mean": 0.3272266923671677,
+  "test_top1k_protein_pearson": 0.801393985748291,
+  "test_median_protein_pearson": 0.5044018030166626,
+  "test_top1k_protein_spearman": 0.7248650193214417,
+  "test_median_protein_spearman": 0.41948050260543823,
+  "total_params": 10087111
+}

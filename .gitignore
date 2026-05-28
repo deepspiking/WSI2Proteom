@@ -9,6 +9,9 @@
 # Serialized normalizer
 normalizer.pkl
 
+# Backup files
+*.bak
+
 # Python cache
 __pycache__/
 *.pyc
