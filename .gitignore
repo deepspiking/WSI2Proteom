@@ -37,6 +37,12 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
+# Experiment outputs (checkpoints, logs, per-run results)
+experiments/
+
+# Generated figures
+reports/figures/
+
 # Coverage
 htmlcov/
 .coverage
