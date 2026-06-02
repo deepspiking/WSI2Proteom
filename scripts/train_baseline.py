@@ -58,7 +58,40 @@ class AverageMeter:
         return self.sum / self.count if self.count > 0 else 0.0
 
 
-def train_one_epoch(model, loader, optimizer, normalizer, device, epoch):
+def pearson_r_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Differentiable 1 - PearsonR, averaged over proteins (dimension 1)."""
+    r = pearson_r_per_protein(target, pred)
+    r = r[~torch.isnan(r)]
+    loss = 1.0 - r
+    return loss.mean() if loss.numel() > 0 else torch.tensor(0.0, device=pred.device)
+
+
+def compute_loss(pred: torch.Tensor, target_norm: torch.Tensor,
+                 loss_type: str = "smoothl1",
+                 smoothl1_beta: float = 1.0,
+                 huber_delta: float = 1.0,
+                 pearson_aux_weight: float = 0.0) -> torch.Tensor:
+    if loss_type == "smoothl1":
+        base_loss = F.smooth_l1_loss(pred, target_norm, beta=smoothl1_beta)
+    elif loss_type == "mse":
+        base_loss = F.mse_loss(pred, target_norm)
+    elif loss_type == "huber":
+        base_loss = F.huber_loss(pred, target_norm, delta=huber_delta)
+    elif loss_type == "pearson":
+        base_loss = pearson_r_loss(pred, target_norm)
+    else:
+        raise ValueError(f"Unknown loss: {loss_type}")
+
+    if pearson_aux_weight > 0:
+        aux_loss = pearson_r_loss(pred, target_norm)
+        base_loss = base_loss + pearson_aux_weight * aux_loss
+
+    return base_loss
+
+
+def train_one_epoch(model, loader, optimizer, normalizer, device, epoch,
+                    loss_type="smoothl1", smoothl1_beta=1.0, huber_delta=1.0,
+                    pearson_aux_weight=0.0):
     model.train()
     loss_meter = AverageMeter()
     pearson_meter = AverageMeter()
@@ -70,7 +103,7 @@ def train_one_epoch(model, loader, optimizer, normalizer, device, epoch):
         target_norm = normalizer.transform(target).to(device)
 
         pred = model(features)
-        loss = F.smooth_l1_loss(pred, target_norm)
+        loss = compute_loss(pred, target_norm, loss_type, smoothl1_beta, huber_delta, pearson_aux_weight)
 
         with torch.no_grad():
             r = pearson_r_per_protein(target_norm, pred)
@@ -93,7 +126,9 @@ def train_one_epoch(model, loader, optimizer, normalizer, device, epoch):
 
 
 @torch.no_grad()
-def evaluate(model, loader, normalizer, device, desc="Eval"):
+def evaluate(model, loader, normalizer, device, desc="Eval",
+             loss_type="smoothl1", smoothl1_beta=1.0, huber_delta=1.0,
+             pearson_aux_weight=0.0):
     model.eval()
     loss_meter = AverageMeter()
     pearson_meter = AverageMeter()
@@ -107,7 +142,7 @@ def evaluate(model, loader, normalizer, device, desc="Eval"):
         target_norm = normalizer.transform(target).to(device)
 
         pred = model(features)
-        loss = F.smooth_l1_loss(pred, target_norm)
+        loss = compute_loss(pred, target_norm, loss_type, smoothl1_beta, huber_delta, pearson_aux_weight)
 
         r = pearson_r_per_protein(target_norm, pred)
         r = r[~torch.isnan(r)]
@@ -187,6 +222,18 @@ def main():
                         help="Entropy regularization for Sinkhorn")
     parser.add_argument("--n_experts", type=int, default=4,
                         help="Number of experts for moae model")
+    parser.add_argument("--loss", type=str, default="smoothl1",
+                        choices=["smoothl1", "mse", "huber", "pearson"],
+                        help="Loss function for training")
+    parser.add_argument("--smoothl1-beta", type=float, default=1.0,
+                        help="Beta parameter for Smooth L1 loss")
+    parser.add_argument("--huber-delta", type=float, default=1.0,
+                        help="Delta parameter for Huber loss")
+    parser.add_argument("--monitor", type=str, default="val_loss",
+                        choices=["val_loss", "val_pearson"],
+                        help="Metric to monitor for checkpointing / scheduler / early stopping")
+    parser.add_argument("--pearson-aux-weight", type=float, default=0.0,
+                        help="Weight for Pearson correlation auxiliary loss term (0 = disabled)")
     args = parser.parse_args()
 
     if args.cls_dims is not None:
@@ -302,23 +349,30 @@ def main():
     print(f"Model: {args.model} | Params: {total_params:,}")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    monitor_mode = "min" if args.monitor == "val_loss" else "max"
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", patience=10, factor=0.5
+        optimizer, mode=monitor_mode, patience=10, factor=0.5
     )
+    early_stop_patience = args.patience
 
-    best_val_loss = float("inf")
+    best_monitor_value = float("inf") if monitor_mode == "min" else float("-inf")
     patience_counter = 0
     history = {"train_loss": [], "val_loss": [], "train_pearson": [], "val_pearson": [],
                "train_spearman": [], "val_spearman": []}
     start_time = time.time()
 
+    loss_kw = dict(loss_type=args.loss, smoothl1_beta=getattr(args, "smoothl1_beta", 1.0),
+                   huber_delta=getattr(args, "huber_delta", 1.0),
+                   pearson_aux_weight=args.pearson_aux_weight)
+
     for epoch in range(1, args.epochs + 1):
         train_loss, train_r, train_s = train_one_epoch(
-            model, train_loader, optimizer, normalizer, device, epoch)
+            model, train_loader, optimizer, normalizer, device, epoch, **loss_kw)
         val_loss, val_r, val_s, _, _ = evaluate(
-            model, val_loader, normalizer, device, desc=f"Val E{epoch}")
+            model, val_loader, normalizer, device, desc=f"Val E{epoch}", **loss_kw)
 
-        scheduler.step(val_loss)
+        current_monitor = val_loss if args.monitor == "val_loss" else val_r
+        scheduler.step(current_monitor)
 
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
@@ -332,8 +386,9 @@ def main():
               f"train_s={train_s:.4f} | val_loss={val_loss:.4f} val_r={val_r:.4f} "
               f"val_s={val_s:.4f} | lr={optimizer.param_groups[0]['lr']:.2e} | {elapsed:.0f}s")
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        is_better = (current_monitor < best_monitor_value) if monitor_mode == "min" else (current_monitor > best_monitor_value)
+        if is_better:
+            best_monitor_value = current_monitor
             patience_counter = 0
             torch.save({
                 "epoch": epoch,
@@ -342,12 +397,14 @@ def main():
                 "val_loss": val_loss,
                 "val_pearson": val_r,
                 "val_spearman": val_s,
+                "monitor": args.monitor,
+                "monitor_value": current_monitor,
                 "args": vars(args),
             }, out_dir / "best_model.pt")
         else:
             patience_counter += 1
-            if patience_counter >= args.patience:
-                print(f"Early stopping at epoch {epoch}")
+            if patience_counter >= early_stop_patience:
+                print(f"Early stopping at epoch {epoch} (patience={early_stop_patience})")
                 break
 
     print("\n--- Testing best model ---")
@@ -355,7 +412,7 @@ def main():
     model.load_state_dict(ckpt["model_state"])
     model.to(device)
     test_loss, test_r, test_s, test_preds, test_targets = evaluate(
-        model, test_loader, normalizer, device, desc="Test"
+        model, test_loader, normalizer, device, desc="Test", **loss_kw
     )
     print(f"Test loss={test_loss:.4f} pearson_r={test_r:.4f} spearman_r={test_s:.4f}")
 
@@ -390,7 +447,8 @@ def main():
         "args": vars(args),
         "out_dim": out_dim,
         "best_epoch": ckpt["epoch"],
-        "best_val_loss": best_val_loss,
+        "best_monitor": args.monitor,
+        "best_monitor_value": best_monitor_value,
         "best_val_pearson": ckpt["val_pearson"],
         "best_val_spearman": ckpt["val_spearman"],
         "test_loss": test_loss,
